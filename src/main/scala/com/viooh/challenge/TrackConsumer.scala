@@ -22,6 +22,7 @@ object TrackConsumer {
   type TrackName = String
 
   val MAX_SESSIONS = 50
+  val MAX_TRACKS = 10
 
   def main(args: Array[String]): Unit = {
     import Serdes._
@@ -44,7 +45,9 @@ object TrackConsumer {
     import org.apache.kafka.common.serialization.{Serdes => JSerdes}
 
     // val lastFmListeningSerdes: Serde[LastFmListening] = JSerdes.serdeFrom(new LastFmListeningSerializer, new LastFmListeningDeserializer)
+    val trackSerdes: Serde[Track] = JSerdes.serdeFrom(new TrackSerializer, new TrackDeserializer)
     val trackStoreSerdes: Serde[Map[TrackId, Track]] = JSerdes.serdeFrom(new TrackStoreSerializer, new TrackStoreDeserializer)
+    val mostPlayedTrackStoreSerdes: Serde[List[Track]] = JSerdes.serdeFrom(new MostPlayedTrackStoreSerializer, new MostPlayedTrackStoreDeserializer)
     val sessionSerdes: Serde[Session] = JSerdes.serdeFrom(new SessionSerializer, new SessionDeserializer)
     val sessionStoreSerdes: Serde[List[Session]] = JSerdes.serdeFrom(new SessionStoreSerializer, new SessionStoreDeserializer)
 
@@ -57,27 +60,42 @@ object TrackConsumer {
     implicit val trackStoreMaterializer: Materialized[String, Map[TrackId, Track], ByteArraySessionStore] =
       Materialized.`with`[String, Map[TrackId, Track], ByteArraySessionStore](Serdes.String, trackStoreSerdes)
 
+    implicit val mostPlayedTrackStoreMaterializer: Materialized[Int, List[Track], ByteArrayKeyValueStore] =
+      Materialized.`with`[Int, List[Track], ByteArrayKeyValueStore](Serdes.Integer, mostPlayedTrackStoreSerdes)
+
     implicit val sessionMaterializer: Materialized[Long, List[Session], ByteArraySessionStore] =
       Materialized.`with`[Long, List[Session], ByteArraySessionStore](Serdes.Long, sessionStoreSerdes)
 
     implicit val sessionStoreMaterializer: Materialized[Long, List[Session], ByteArrayKeyValueStore] =
       Materialized.`with`[Long, List[Session], ByteArrayKeyValueStore](Serdes.Long, sessionStoreSerdes)
 
-    val sessions: KStream[String, Session] = lastFmListenings
-      .peek((userId, v) => println(s"userId=$userId v=$v"))
-      .groupByKey
-      .windowedBy(sessionWindow)
-      .aggregate(Map.empty[TrackId, Track])(trackAggregator, trackMerger)
-      .toStream
-      .map(toSession)
-      .peek((userId, v) => println(s"userId=$userId v=$v"))
+    val sessions: KStream[String, Session] =
+      lastFmListenings
+        .peek((userId, v) => println(s"userId=$userId v=$v"))
+        .groupByKey
+        .windowedBy(sessionWindow)
+        .aggregate(Map.empty[TrackId, Track])(trackAggregator, trackMerger)
+        .toStream
+        .map(toSession)
+        .filter((k, session) => session.sessionDurationSeconds > 0) // TODO Check why we have empty sessions
+        .peek((userId, v) => println(s"userId=$userId v=$v"))
 
-    sessions
-      .selectKey((userId, session) => session.sessionDurationSeconds)
-      .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
-      .aggregate(List.empty[Session])(sessionAggregator)
+    val top50Sessions: KStream[Long, List[Session]] =
+      sessions
+        .selectKey((userId, session) => session.sessionDurationSeconds)
+        .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
+        .aggregate(List.empty[Session])(sessionAggregator)
+        .toStream
+        .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
+
+    top50Sessions
+      .flatMapValues((sessionDuration, sessions) => sessions.flatMap(_.tracks.values))
+      .selectKey { case (sessionDuration, track) => track.playCount }
+      .groupByKey(kstream.Grouped.`with`(Serdes.Integer, trackSerdes))
+      .aggregate(List.empty[Track])(mostPlayedTrackAggregator)
       .toStream
-      .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
+      .flatMapValues((playCount, tracks) => tracks)
+      .peek((playCount, track) => println(s"playCount=$playCount track=$track"))
     // .to(outputTopic)(Produced.`with`(Serdes.String, sessionSerdes))
 
     val streams = new KafkaStreams(builder.build(), props)
@@ -169,6 +187,35 @@ object TrackConsumer {
           (sessionStore :+ session).sortWith(_.sessionDurationSeconds < _.sessionDurationSeconds).take(MAX_SESSIONS)
         } else {
           sessionStore
+        }
+      }
+    }
+  }
+
+  /**
+   * This aggregator processes each session whose session duration is the same, and produces a collection of this sessions
+   * by keeping only the top 50 sessions per session duration.
+   *
+   * @param playCount
+   * @param track
+   * @param trackStore
+   * @return
+   */
+  def mostPlayedTrackAggregator(playCount: Int, track: Track, trackStore: List[Track]): List[Track] = {
+    if (trackStore.isEmpty) {
+      // If the sessionSore is empty then we can add the given session
+      trackStore :+ track
+    } else {
+      if (trackStore.length < MAX_TRACKS)
+      // we can add tracks in the store without contrainst until the track store contains the max authorized tracks
+      trackStore :+ track
+        else {
+        val minPlayCount: Track = trackStore.minBy(_.playCount)
+
+        if (playCount > minPlayCount.playCount) {
+          (trackStore :+ track).sortWith(_.playCount < _.playCount).take(MAX_TRACKS)
+        } else {
+          trackStore
         }
       }
     }
