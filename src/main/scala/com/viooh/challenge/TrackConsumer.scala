@@ -6,13 +6,13 @@ import java.util.Properties
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.viooh.challenge.model.{Session, Track}
-import com.viooh.challenge.serializer.{SessionDeserializer, SessionSerializer, SessionStoreDeserializer, SessionStoreSerializer, TrackStoreDeserializer, TrackStoreSerializer}
+import com.viooh.challenge.serializer._
 import com.viooh.challenge.utils.TrackTimestampExtractor
 import org.apache.kafka.common.serialization.Serde
 import org.apache.kafka.streams.kstream.{SessionWindows, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
-import org.apache.kafka.streams.scala.kstream.{KStream, Materialized, Produced}
+import org.apache.kafka.streams.scala.kstream.{KStream, Materialized}
 import org.apache.kafka.streams.{KafkaStreams, StreamsConfig}
 import org.slf4j.LoggerFactory
 
@@ -48,12 +48,11 @@ object TrackConsumer {
     val sessionSerdes: Serde[Session] = JSerdes.serdeFrom(new SessionSerializer, new SessionDeserializer)
     val sessionStoreSerdes: Serde[List[Session]] = JSerdes.serdeFrom(new SessionStoreSerializer, new SessionStoreDeserializer)
 
-    // https://kafka.apache.org/25/documentation/streams/developer-guide/write-streams
-    // https://jaceklaskowski.gitbooks.io/mastering-kafka-streams/kafka-streams-scala.html
     val builder: StreamsBuilder = new StreamsBuilder
     val lastFmListenings: KStream[String, String] = builder.stream[String, String](inputTopic)
     val sessionWindowDuration: Duration = java.time.Duration.ofMinutes(20)
-    val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration)
+    val gracePeriod: Duration = java.time.Duration.ofSeconds(10)
+    val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration).grace(gracePeriod)
 
     implicit val trackStoreMaterializer: Materialized[String, Map[TrackId, Track], ByteArraySessionStore] =
       Materialized.`with`[String, Map[TrackId, Track], ByteArraySessionStore](Serdes.String, trackStoreSerdes)
@@ -73,7 +72,7 @@ object TrackConsumer {
       .map(toSession)
       .peek((userId, v) => println(s"userId=$userId v=$v"))
 
-    val top50Sessions: KStream[Long, List[Session]] = sessions
+    sessions
       .selectKey((userId, session) => session.sessionDurationSeconds)
       .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
       .aggregate(List.empty[Session])(sessionAggregator)
@@ -89,12 +88,29 @@ object TrackConsumer {
     }
   }
 
+  /**
+   * Converts a collection of tracks to a Session object
+   *
+   * @param windowedUserId The window to which the tracks belong to
+   * @param tracks         The collection of tracks to move to a session
+   * @return
+   */
   def toSession(windowedUserId: Windowed[String], tracks: Map[TrackId, Track]): (String, Session) = {
     val sessionSeconds: Long = windowedUserId.window().endTime().getEpochSecond - windowedUserId.window().startTime().getEpochSecond
 
     (windowedUserId.key(), Session(windowedUserId.key(), sessionSeconds, tracks))
   }
 
+  /**
+   * This aggregator receives each record coming from the last fm dataset, this dataset is partitioned by userId
+   * Each record corresponds to a track (fields are separated by a tab character), this aggregator creates a collection
+   * of tracks containing all the tracks received as an input in the recordValue field.
+   *
+   * @param userId      The userId the tracks belong to
+   * @param recordValue The track informations as a string whose fields are separated by a tab character
+   * @param trackStore  The collection of tracks that will be filled and returned by the aggregator
+   * @return The collection of tracks
+   */
   def trackAggregator(userId: String, recordValue: String, trackStore: Map[TrackId, Track]): Map[TrackId, Track] = {
     val trackInfo: Array[String] = recordValue.split("\t")
 
@@ -112,10 +128,26 @@ object TrackConsumer {
     } else trackStore
   }
 
+  /**
+   *
+   * @param userId
+   * @param trackStore1
+   * @param trackStore2
+   * @return
+   */
   def trackMerger(userId: String, trackStore1: Map[TrackId, Track], trackStore2: Map[TrackId, Track]): Map[TrackId, Track] = {
     trackStore1 ++ trackStore2 // TODO add values
   }
 
+  /**
+   * This aggregator processes each session whose session duration is the same, and produces a collection of this sessions
+   * by keeping only the top 50 sessions per session duration.
+   *
+   * @param sessionDurationSeconds
+   * @param session
+   * @param sessionStore
+   * @return
+   */
   def sessionAggregator(sessionDurationSeconds: Long, session: Session, sessionStore: List[Session]): List[Session] = {
     if (sessionStore.isEmpty) {
       // If the sessionSore is empty then we can add the given session

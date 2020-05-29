@@ -3,8 +3,7 @@ package com.viooh.challenge.serializer
 import java.util
 
 import argonaut.Argonaut._
-import com.viooh.challenge.TrackConsumer.TrackId
-import com.viooh.challenge.model.{Session, Track}
+import com.viooh.challenge.model.Session
 import org.apache.kafka.common.serialization.Serializer
 
 class SessionSerializer extends Serializer[Session] {
@@ -14,9 +13,7 @@ class SessionSerializer extends Serializer[Session] {
     if (t == null)
       null
     else {
-      val json = t.asJson.toString()
-      println(s"serializer $t ($json)")
-      json.getBytes
+      t.asJson.toString().getBytes
     }
   }
 

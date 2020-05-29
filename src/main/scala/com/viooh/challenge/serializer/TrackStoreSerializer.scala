@@ -3,7 +3,6 @@ package com.viooh.challenge.serializer
 import java.util
 
 import argonaut.Argonaut._
-import argonaut._
 import com.viooh.challenge.TrackConsumer.TrackId
 import com.viooh.challenge.model.Track
 import org.apache.kafka.common.serialization.Serializer
