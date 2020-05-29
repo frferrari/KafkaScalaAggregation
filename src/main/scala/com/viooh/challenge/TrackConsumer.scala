@@ -129,14 +129,20 @@ object TrackConsumer {
   }
 
   /**
+   * Allows to merge 2 different trackStore by summing the playCount values for identical tracks (trackId)
    *
-   * @param userId
-   * @param trackStore1
-   * @param trackStore2
-   * @return
+   * @param userId      The userId the tracks belong to
+   * @param trackStore1 The first track store
+   * @param trackStore2 The second track store
+   * @return A new trackSTore containing the added values of playCount
    */
   def trackMerger(userId: String, trackStore1: Map[TrackId, Track], trackStore2: Map[TrackId, Track]): Map[TrackId, Track] = {
-    trackStore1 ++ trackStore2 // TODO add values
+    trackStore2.foldLeft(trackStore1) { case (acc, (trackId, track2)) =>
+      acc.get(trackId) match {
+        case Some(track1) => acc + (trackId -> track1.copy(playCount = track1.playCount + track2.playCount))
+        case None => acc + (trackId -> track2)
+      }
+    }
   }
 
   /**
