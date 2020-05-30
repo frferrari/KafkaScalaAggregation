@@ -5,7 +5,7 @@ import java.time.Duration
 import java.util.Properties
 
 import com.typesafe.config.{Config, ConfigFactory}
-import com.viooh.challenge.model.{Session, Track}
+import com.viooh.challenge.model.{PlayedTrack, Session, Track}
 import com.viooh.challenge.utils.TrackTimestampExtractor
 import org.apache.kafka.streams.kstream.{SessionWindows, Window, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
@@ -18,9 +18,11 @@ object TrackConsumer {
 
   type TrackId = String
   type TrackName = String
+  type UserId = String
+  type SessionDuration = Long
 
   val MAX_SESSIONS = 50
-  val MAX_TRACKS = 2
+  val MAX_TRACKS = 10
 
   def main(args: Array[String]): Unit = {
     import Serdes._
@@ -28,6 +30,7 @@ object TrackConsumer {
     import com.viooh.challenge.aggregation.TrackAggregator._
     import com.viooh.challenge.serdes.SessionSerdes._
     import com.viooh.challenge.serdes.TrackSerdes._
+    import com.viooh.challenge.serdes.PlayedTrackSerdes._
 
     val logger: Logger = LoggerFactory.getLogger(TrackConsumer.getClass)
     val config: Config = ConfigFactory.load().getConfig("dev")
@@ -50,26 +53,27 @@ object TrackConsumer {
     val gracePeriod: Duration = java.time.Duration.ofSeconds(10)
     val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration).grace(gracePeriod)
 
-    val sessions: KStream[String, Session] =
+    val sessions: KStream[UserId, Session] =
       lastFmListenings
-        .peek((userId, v) => println(s"userId=$userId v=$v"))
-        .groupByKey
+        .flatMapValues((userId, record) => PlayedTrack(userId, record))
+        // .peek((userId, v) => println(s"userId=$userId v=$v"))
+        .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
         .windowedBy(sessionWindow)
-        .aggregate(Map.empty[TrackId, Track])(trackAggregator, trackMerger)
+        .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
         .toStream
         .filter(isValidEvent)
-        .peek((wk, m) => println(s"wk=${wk} m=$m"))
+        // .peek((wk, m) => println(s"wk=${wk} m=$m"))
         .map(toSession)
-        .peek((userId, v) => println(s"userId=$userId v=$v"))
+        // .peek((userId, v) => println(s"userId=$userId v=$v"))
 
     // The top sessions in terms of duration
-    val topSessions: KStream[Long, List[Session]] =
+    val topSessions: KStream[SessionDuration, List[Session]] =
       sessions
         .selectKey((userId, session) => session.sessionDurationSeconds)
         .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
         .aggregate(List.empty[Session])(sessionAggregator(MAX_SESSIONS))
         .toStream
-        .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
+        // .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
 
     topSessions
       .flatMapValues((sessionDuration, sessions) => sessions.flatMap(_.tracks.values))
@@ -96,7 +100,7 @@ object TrackConsumer {
    * @param tracks         The collection of tracks to move to a session
    * @return
    */
-  def toSession(windowedUserId: Windowed[String], tracks: Map[TrackId, Track]): (String, Session) = {
+  def toSession(windowedUserId: Windowed[UserId], tracks: Map[TrackName, Track]): (UserId, Session) = {
     val sessionSeconds: Long = windowedUserId.window().endTime().getEpochSecond - windowedUserId.window().startTime().getEpochSecond
 
     (windowedUserId.key(), Session(windowedUserId.key(), sessionSeconds, tracks))
@@ -104,6 +108,7 @@ object TrackConsumer {
 
   /**
    * Computes the duration of a window
+   *
    * @param window The window to compute the duration for
    * @return The duration of the window in seconds
    */
@@ -111,6 +116,7 @@ object TrackConsumer {
 
   /**
    * Checks wether a window is empty or not (meaning its duration equals 0)
+   *
    * @param window The window to check for 0 length
    * @return A boolean indicating if the window length equals 0 or not
    */
@@ -118,12 +124,13 @@ object TrackConsumer {
 
   /**
    * Checks if an event is valid, it allows to get rid of intermediary events produced by Kafka
+   *
    * @param windowedUserId
    * @param tracks
    * @return
    */
-  def isValidEvent(windowedUserId: Windowed[String], tracks: Map[TrackId, Track]): Boolean = {
-      tracks != null &&
+  def isValidEvent(windowedUserId: Windowed[UserId], tracks: Map[TrackName, Track]): Boolean = {
+    tracks != null &&
       tracks.nonEmpty
   }
 }

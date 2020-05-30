@@ -1,6 +1,6 @@
 package com.viooh.challenge.aggregation
 
-import com.viooh.challenge.TrackConsumer.MAX_SESSIONS
+import com.viooh.challenge.TrackConsumer.{MAX_SESSIONS, SessionDuration}
 import com.viooh.challenge.model.Session
 
 object SessionAggregator {
@@ -13,7 +13,7 @@ object SessionAggregator {
    * @param sessionStore
    * @return
    */
-  def sessionAggregator(maxSessions: Int)(sessionDurationSeconds: Long, session: Session, sessionStore: List[Session]): List[Session] = {
+  def sessionAggregator(maxSessions: Int)(sessionDurationSeconds: SessionDuration, session: Session, sessionStore: List[Session]): List[Session] = {
     if (sessionStore.isEmpty) {
       // If the sessionSore is empty then we can add the given session
       sessionStore :+ session
