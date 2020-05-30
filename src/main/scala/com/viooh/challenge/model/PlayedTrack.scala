@@ -17,6 +17,20 @@ case class PlayedTrack(userId: String,
                        trackName: TrackName)
 
 object PlayedTrack {
+  /**
+   * Converts a string containing a record from the lastfm dataset to a PlayedTrack object
+   * The expected format for the record is the following list of fields separated by the sep character
+   *  eventTime as a timestamp (ex: 2020-05-30T14:20:00Z)
+   *  artistId as a string
+   *  artistName as a string
+   *  trackId as a string
+   *  trackName as a string
+   * @param userId The userId who played the track
+   * @param record INput record containing all the required fields separated by the sep character
+   * @param sep The field separator for the input record
+   * @param timestampFormat The format of the eventTime timestamp for decoding
+   * @return An optional PlayedTrack object, it is not defined if some fields are missing or if the eventTime could not be decoded
+   */
   def apply(userId: String, record: String, sep: Char = '\t', timestampFormat: String = "yyyy-MM-dd'T'hh:mm:ssX"): Option[PlayedTrack] = {
     record.split(sep) match {
       case Array(eventTime, artistId, artistName, trackId, trackName) =>
