@@ -25,7 +25,7 @@ object SessionAggregator {
         val minSessionDuration: Session = sessionStore.minBy(_.sessionDurationSeconds)
 
         if (sessionDurationSeconds > minSessionDuration.sessionDurationSeconds) {
-          (sessionStore :+ session).sortWith(_.sessionDurationSeconds < _.sessionDurationSeconds).take(MAX_SESSIONS)
+          (sessionStore :+ session).sortWith(_.sessionDurationSeconds > _.sessionDurationSeconds).take(maxSessions)
         } else {
           sessionStore
         }

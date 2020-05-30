@@ -1,6 +1,6 @@
 package com.viooh.challenge.aggregation
 
-import com.viooh.challenge.TrackConsumer.{MAX_TRACKS, TrackName}
+import com.viooh.challenge.TrackConsumer.TrackName
 import com.viooh.challenge.model.{PlayedTrack, Track}
 
 object TrackAggregator {
@@ -48,18 +48,19 @@ object TrackAggregator {
    * @return A list of maxTracks tracks
    */
   def mostPlayedTrackAggregator(maxTracks: Int)(playCount: Int, track: Track, trackStore: List[Track]): List[Track] = {
+    assert(maxTracks > 0, "The maxTracks count has to be greater than 0")
+
     if (trackStore.isEmpty) {
       // If the sessionSore is empty then we can add the given session
       trackStore :+ track
     } else {
       if (trackStore.length < maxTracks)
-      // we can add tracks in the store without contrainst until the track store contains the max authorized tracks
-      trackStore :+ track
-        else {
+        trackStore :+ track
+      else {
         val minPlayCount: Track = trackStore.minBy(_.playCount)
 
-        if (playCount > minPlayCount.playCount) {
-          (trackStore :+ track).sortWith(_.playCount < _.playCount).take(MAX_TRACKS)
+        if (track.playCount > minPlayCount.playCount) {
+          (trackStore :+ track).sortWith(_.playCount > _.playCount).take(maxTracks)
         } else {
           trackStore
         }
