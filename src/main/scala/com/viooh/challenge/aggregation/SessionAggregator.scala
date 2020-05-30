@@ -13,12 +13,12 @@ object SessionAggregator {
    * @param sessionStore
    * @return
    */
-  def sessionAggregator(sessionDurationSeconds: Long, session: Session, sessionStore: List[Session]): List[Session] = {
+  def sessionAggregator(maxSessions: Int)(sessionDurationSeconds: Long, session: Session, sessionStore: List[Session]): List[Session] = {
     if (sessionStore.isEmpty) {
       // If the sessionSore is empty then we can add the given session
       sessionStore :+ session
     } else {
-      if (sessionStore.length < MAX_SESSIONS)
+      if (sessionStore.length < maxSessions)
       // we can add sessions in the store without contrainst until the session store contains the max authorized sessions
       sessionStore :+ session
         else {

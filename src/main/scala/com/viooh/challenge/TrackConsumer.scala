@@ -7,7 +7,7 @@ import java.util.Properties
 import com.typesafe.config.{Config, ConfigFactory}
 import com.viooh.challenge.model.{Session, Track}
 import com.viooh.challenge.utils.TrackTimestampExtractor
-import org.apache.kafka.streams.kstream.{SessionWindows, Windowed}
+import org.apache.kafka.streams.kstream.{SessionWindows, Window, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
 import org.apache.kafka.streams.scala.kstream.KStream
@@ -20,7 +20,7 @@ object TrackConsumer {
   type TrackName = String
 
   val MAX_SESSIONS = 50
-  val MAX_TRACKS = 10
+  val MAX_TRACKS = 2
 
   def main(args: Array[String]): Unit = {
     import Serdes._
@@ -57,23 +57,25 @@ object TrackConsumer {
         .windowedBy(sessionWindow)
         .aggregate(Map.empty[TrackId, Track])(trackAggregator, trackMerger)
         .toStream
+        .filter(isValidEvent)
+        .peek((wk, m) => println(s"wk=${wk} m=$m"))
         .map(toSession)
-        .filter((k, session) => session.sessionDurationSeconds > 0) // TODO Check why we have empty sessions
         .peek((userId, v) => println(s"userId=$userId v=$v"))
 
-    val top50Sessions: KStream[Long, List[Session]] =
+    // The top sessions in terms of duration
+    val topSessions: KStream[Long, List[Session]] =
       sessions
         .selectKey((userId, session) => session.sessionDurationSeconds)
         .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
-        .aggregate(List.empty[Session])(sessionAggregator)
+        .aggregate(List.empty[Session])(sessionAggregator(MAX_SESSIONS))
         .toStream
         .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
 
-    top50Sessions
+    topSessions
       .flatMapValues((sessionDuration, sessions) => sessions.flatMap(_.tracks.values))
       .selectKey { case (sessionDuration, track) => track.playCount }
       .groupByKey(kstream.Grouped.`with`(Serdes.Integer, trackSerdes))
-      .aggregate(List.empty[Track])(mostPlayedTrackAggregator)
+      .aggregate(List.empty[Track])(mostPlayedTrackAggregator(MAX_TRACKS))
       .toStream
       .flatMapValues((playCount, tracks) => tracks)
       .peek((playCount, track) => println(s"playCount=$playCount track=$track"))
@@ -98,5 +100,30 @@ object TrackConsumer {
     val sessionSeconds: Long = windowedUserId.window().endTime().getEpochSecond - windowedUserId.window().startTime().getEpochSecond
 
     (windowedUserId.key(), Session(windowedUserId.key(), sessionSeconds, tracks))
+  }
+
+  /**
+   * Computes the duration of a window
+   * @param window The window to compute the duration for
+   * @return The duration of the window in seconds
+   */
+  def windowDuration(window: Window): Long = window.end() - window.start()
+
+  /**
+   * Checks wether a window is empty or not (meaning its duration equals 0)
+   * @param window The window to check for 0 length
+   * @return A boolean indicating if the window length equals 0 or not
+   */
+  def isWindowEmpty(window: Window): Boolean = windowDuration(window) == 0
+
+  /**
+   * Checks if an event is valid, it allows to get rid of intermediary events produced by Kafka
+   * @param windowedUserId
+   * @param tracks
+   * @return
+   */
+  def isValidEvent(windowedUserId: Windowed[String], tracks: Map[TrackId, Track]): Boolean = {
+      tracks != null &&
+      tracks.nonEmpty
   }
 }

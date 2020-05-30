@@ -23,9 +23,7 @@ object TrackAggregator {
       val trackName: TrackName = trackInfo(4)
 
       trackStore.get(trackId) match {
-        case Some(track) => {
-          trackStore + (trackId -> track.copy(playCount = track.playCount + 1))
-        }
+        case Some(track) => trackStore + (trackId -> track.copy(playCount = track.playCount + 1))
         case None => trackStore + (trackId -> Track(trackId, trackName, 1))
       }
     } else trackStore
@@ -49,20 +47,20 @@ object TrackAggregator {
   }
 
   /**
-   * This aggregator processes each session whose session duration is the same, and produces a collection of this sessions
-   * by keeping only the top 50 sessions per session duration.
+   * This aggregator processes each track whose play count is the same, and produces a collection of this tracks
+   * by keeping only the top maxTracks tracks per play count
    *
-   * @param playCount
-   * @param track
-   * @param trackStore
-   * @return
+   * @param playCount  How many times a track has been played
+   * @param track      The track details
+   * @param trackStore A store of 1 to many tracks, from which we want to extract the top maxTracks tracks
+   * @return A list of maxTracks tracks
    */
-  def mostPlayedTrackAggregator(playCount: Int, track: Track, trackStore: List[Track]): List[Track] = {
+  def mostPlayedTrackAggregator(maxTracks: Int)(playCount: Int, track: Track, trackStore: List[Track]): List[Track] = {
     if (trackStore.isEmpty) {
       // If the sessionSore is empty then we can add the given session
       trackStore :+ track
     } else {
-      if (trackStore.length < MAX_TRACKS)
+      if (trackStore.length < maxTracks)
       // we can add tracks in the store without contrainst until the track store contains the max authorized tracks
       trackStore :+ track
         else {
