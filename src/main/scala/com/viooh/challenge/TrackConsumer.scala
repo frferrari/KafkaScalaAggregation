@@ -56,15 +56,15 @@ object TrackConsumer {
     val sessions: KStream[UserId, Session] =
       lastFmListenings
         .flatMapValues((userId, record) => PlayedTrack(userId, record))
-        // .peek((userId, v) => println(s"userId=$userId v=$v"))
+        .peek((userId, v) => println(s"userId=$userId v=$v"))
         .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
         .windowedBy(sessionWindow)
         .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
         .toStream
         .filter(isValidEvent)
-        // .peek((wk, m) => println(s"wk=${wk} m=$m"))
+        .peek((wk, m) => println(s"wk=${wk} m=$m"))
         .map(toSession)
-        // .peek((userId, v) => println(s"userId=$userId v=$v"))
+        .peek((userId, v) => println(s"userId=$userId v=$v"))
 
     // The top sessions in terms of duration
     val topSessions: KStream[SessionDuration, List[Session]] =
@@ -73,7 +73,7 @@ object TrackConsumer {
         .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
         .aggregate(List.empty[Session])(sessionAggregator(MAX_SESSIONS))
         .toStream
-        // .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
+        .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
 
     topSessions
       .flatMapValues((sessionDuration, sessions) => sessions.flatMap(_.tracks.values))
