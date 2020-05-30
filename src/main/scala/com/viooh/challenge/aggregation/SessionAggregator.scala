@@ -1,6 +1,6 @@
 package com.viooh.challenge.aggregation
 
-import com.viooh.challenge.TrackConsumer.{MAX_SESSIONS, SessionDuration}
+import com.viooh.challenge.TrackConsumer.SessionDuration
 import com.viooh.challenge.model.Session
 
 object SessionAggregator {

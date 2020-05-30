@@ -154,7 +154,7 @@ class TrackAggregatorTest extends WordSpec with Matchers {
     }
 
     "given a track whose playCount is lower than the track who has the lowest playCount from the trackStore tracks AND a trackStore containing 3 tracks AND a maxTracks = 3" should {
-      "a trackStore containing the 3 tracks having the highest playCount" in {
+      "return a trackStore containing the 3 tracks having the highest playCount" in {
         val trackStore: List[Track] = List(track2, track3, track4)
         val expectedTrackStore: List[Track] = List(track2, track3, track4)
         mostPlayedTrackAggregator(3)(track1.playCount, track1, trackStore) should contain theSameElementsAs expectedTrackStore
