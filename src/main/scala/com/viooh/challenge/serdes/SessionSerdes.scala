@@ -15,6 +15,6 @@ object SessionSerdes {
   implicit val sessionMaterializer: Materialized[Long, List[Session], ByteArraySessionStore] =
     Materialized.`with`[Long, List[Session], ByteArraySessionStore](Serdes.Long, sessionStoreSerdes)
 
-  implicit val sessionStoreMaterializer: Materialized[Long, List[Session], ByteArrayKeyValueStore] =
-    Materialized.`with`[Long, List[Session], ByteArrayKeyValueStore](Serdes.Long, sessionStoreSerdes)
+  implicit val sessionStoreMaterializer: Materialized[Int, List[Session], ByteArrayKeyValueStore] =
+    Materialized.`with`[Int, List[Session], ByteArrayKeyValueStore](Serdes.Integer, sessionStoreSerdes)
 }

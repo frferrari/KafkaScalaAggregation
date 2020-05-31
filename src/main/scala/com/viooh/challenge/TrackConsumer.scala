@@ -12,11 +12,13 @@ import com.viooh.challenge.utils.TrackTimestampExtractor
 import org.apache.kafka.streams.kstream.{SessionWindows, Transformer, TransformerSupplier, ValueTransformerSupplier, Window, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
-import org.apache.kafka.streams.scala.kstream.{KGroupedStream, KStream}
+import org.apache.kafka.streams.scala.kstream.{KGroupedStream, KStream, KTable, Produced}
 import org.apache.kafka.streams.state.{KeyValueBytesStoreSupplier, KeyValueStore, StoreBuilder, Stores}
 import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
 import org.slf4j.{Logger, LoggerFactory}
 import java.util.UUID.randomUUID
+
+import scala.collection.mutable
 
 object TrackConsumer {
 
@@ -71,47 +73,34 @@ object TrackConsumer {
     val gracePeriod: Duration = java.time.Duration.ofSeconds(10)
     val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration).grace(gracePeriod)
 
-    val sessions: KStream[SessionId, Session] =
-      lastFmListenings
-        .flatMapValues((userId, record) => PlayedTrack(userId, record))
-        // .peek((userId, v) => println(s"userId=$userId v=$v"))
-        .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
-        .windowedBy(sessionWindow)
-        .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
-        .toStream
-        .filter(isValidEvent)
-        // .peek((wk, m) => println(s"wk=${wk} m=$m"))
-        .map(toSession(MAX_TRACKS))
-    // .flatMap(mkString)
-    // .to(outputTopic)
+    lastFmListenings
+      .flatMapValues((userId, record) => PlayedTrack(userId, record))
+      // .peek((userId, v) => println(s"userId=$userId v=$v"))
+      .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
+      .windowedBy(sessionWindow)
+      .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
+      .toStream
+      .filter(isValidEvent)
+      // .peek((wk, m) => println(s"wk=${wk} m=$m"))
+      .map(toSession(MAX_TRACKS))
+      .to(sessionTopic)(Produced.`with`(Serdes.String, sessionSerdes))
 
     /*
-    val TransformerSupplier: TransformerSupplier[SessionId, Session, KeyValue[SessionId, Session]] =
-      () => new TopSessionTransformer(sessionStoreName, MAX_SESSIONS)
-
-     */
-
-    val valueTransformerSupplier: ValueTransformerSupplier[Session, Session] =
-      () => new TopSessionTransformer(sessionStoreName, MAX_SESSIONS)
-
-    sessions
-      .transformValues(valueTransformerSupplier, sessionStoreName)
-      .filter((sessionId, session) => session != null)
-      .peek((sessionId, session) => println(s"sessionId=$sessionId session=$session"))
-
-    sessions
-      .groupBy((sessionId, session) => session.tracks.size)(kstream.Grouped.`with`(Serdes.Integer, sessionSerdes))
-
-
-    //  .transform(TransformerSupplier, sessionStoreName)
-
-    /*
-    val TransformerSupplier: TransformerSupplier[SessionId, Session, KeyValue[SessionId, Session]] =
-      () => new TopSessionTransformer(sessionStoreName, MAX_SESSIONS)
-
+    val topSessions =
       sessions
-      .transform(TransformerSupplier, sessionStoreName)
-      .peek((sessionId, session) => println(s"sessionId=$sessionId session=$session"))
+      .groupBy((sessionId, session) => session.tracks.size)(kstream.Grouped.`with`(Serdes.Integer, sessionSerdes))
+      .aggregate(List.empty[Session])(sessionAggregator(MAX_SESSIONS))
+      .toStream
+      .flatMapValues(sessions => sessions.toIterable)
+
+
+    val topSessionsssss =
+      sessions
+        .groupBy((sessionId, session) => session.tracks.size)(kstream.Grouped.`with`(Serdes.Integer, sessionSerdes))
+        .aggregate(() => )
+        .toStream
+        .flatMapValues(sessions => sessions.toIterable)
+
      */
 
     /*
