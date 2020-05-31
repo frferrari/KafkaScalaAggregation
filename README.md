@@ -10,8 +10,8 @@ The goal of this exercise if to extract a list of the top 10 songs played in the
 ## Analysis phase
 
 Reading the Lastfm dataset page is useful to understand the structure of the dataset. It is a text file whose fields are separated by the tab character.
-Looking at the file we can see that the newest records appear first, the older being at the end of the file. This is a problem as we will inject the file  
-in a kafka-producer-client using the cat command, and we expect the oldest events to be injected first.
+Looking at the file we can see that the newest records appear first, the older being at the end of the file. 
+This is a problem as we will inject the file in a kafka-producer-client using the cat command, and we expect the oldest events to be injected first.
 
 ## Sorting the dataset
 
@@ -34,8 +34,12 @@ head -5 userid-timestamp-artid-artname-traid-traname.tsv_sorted > sample.txt
 # Running the project
 
 To run our project we would like to have more than one consumer so that we can benefit from the distribution mechanism that Kafka offers.
-This means that we will create a topic that will have multiple partitions, the dataset will be injected in this topic with a key corresponding  
-to the userid, as the first requirement is to create sessions per userid.
+This means that we will create a topic that will have multiple partitions, the dataset will be injected in this topic with a key corresponding to the userid, as the first requirement is to create sessions per userid.
+
+In terms of topics we will have :
+* an input topic from which our tracks consumer will read the original lastfm dataset. 
+* a session topic that will be feeded by the tracks consumer with the sessions as defined previously, each session will contain the list of tracks for this sessions
+* a top session topic that will contain the top 50 sessions as defined previously (not implemented yet)
 
 To run the project we need to follow the steps below
 
