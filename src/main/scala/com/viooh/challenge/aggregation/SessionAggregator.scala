@@ -4,8 +4,8 @@ import com.viooh.challenge.model.Session
 
 object SessionAggregator {
   /**
-   * This aggregator processes each session whose session duration is the same, and produces a collection of this sessions
-   * by keeping only the top 50 sessions per session duration.
+   * This aggregator processes each session whose count of tracks is the same, and produces a collection of this sessions
+   * by keeping only the top 50 sessions per count of tracks
    *
    * @param trackCount The length of the session in seconds
    * @param session                The session containing different tracks played in this session

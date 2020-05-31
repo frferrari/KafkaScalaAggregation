@@ -3,22 +3,19 @@ package com.viooh.challenge
 import java.nio.file.Files
 import java.time.Duration
 import java.util.Properties
+import java.util.UUID.randomUUID
 
 import com.typesafe.config.{Config, ConfigFactory}
-import com.viooh.challenge.aggregation.TopSessionTransformer
 import com.viooh.challenge.model.{PlayedTrack, Session, Track}
 import com.viooh.challenge.serdes.SessionSerdes
 import com.viooh.challenge.utils.TrackTimestampExtractor
-import org.apache.kafka.streams.kstream.{SessionWindows, Transformer, TransformerSupplier, ValueTransformerSupplier, Window, Windowed}
+import org.apache.kafka.streams.kstream.{SessionWindows, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
-import org.apache.kafka.streams.scala.kstream.{KGroupedStream, KStream, KTable, Produced}
+import org.apache.kafka.streams.scala.kstream.{KStream, Produced}
 import org.apache.kafka.streams.state.{KeyValueBytesStoreSupplier, KeyValueStore, StoreBuilder, Stores}
-import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
+import org.apache.kafka.streams.{KafkaStreams, StreamsConfig}
 import org.slf4j.{Logger, LoggerFactory}
-import java.util.UUID.randomUUID
-
-import scala.collection.mutable
 
 object TrackConsumer {
 
@@ -35,11 +32,10 @@ object TrackConsumer {
 
   def main(args: Array[String]): Unit = {
     import Serdes._
-    import com.viooh.challenge.aggregation.SessionAggregator._
     import com.viooh.challenge.aggregation.TrackAggregator._
+    import com.viooh.challenge.serdes.PlayedTrackSerdes._
     import com.viooh.challenge.serdes.SessionSerdes._
     import com.viooh.challenge.serdes.TrackSerdes._
-    import com.viooh.challenge.serdes.PlayedTrackSerdes._
 
     val logger: Logger = LoggerFactory.getLogger(TrackConsumer.getClass)
     val config: Config = ConfigFactory.load().getConfig("dev")
@@ -75,55 +71,13 @@ object TrackConsumer {
 
     lastFmListenings
       .flatMapValues((userId, record) => PlayedTrack(userId, record))
-      // .peek((userId, v) => println(s"userId=$userId v=$v"))
       .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
       .windowedBy(sessionWindow)
       .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
       .toStream
       .filter(isValidEvent)
-      // .peek((wk, m) => println(s"wk=${wk} m=$m"))
       .map(toSession(MAX_TRACKS))
       .to(sessionTopic)(Produced.`with`(Serdes.String, sessionSerdes))
-
-    /*
-    val topSessions =
-      sessions
-      .groupBy((sessionId, session) => session.tracks.size)(kstream.Grouped.`with`(Serdes.Integer, sessionSerdes))
-      .aggregate(List.empty[Session])(sessionAggregator(MAX_SESSIONS))
-      .toStream
-      .flatMapValues(sessions => sessions.toIterable)
-
-
-    val topSessionsssss =
-      sessions
-        .groupBy((sessionId, session) => session.tracks.size)(kstream.Grouped.`with`(Serdes.Integer, sessionSerdes))
-        .aggregate(() => )
-        .toStream
-        .flatMapValues(sessions => sessions.toIterable)
-
-     */
-
-    /*
-    // The top sessions in terms of duration
-    val topSessions: KStream[SessionDuration, List[Session]] =
-      sessions
-        .selectKey((userId, session) => session.sessionDurationSeconds)
-        .groupByKey(kstream.Grouped.`with`(Serdes.Long, sessionSerdes))
-        .aggregate(List.empty[Session])(sessionAggregator(MAX_SESSIONS))
-        .toStream
-        .map((sessionDuration, sessions) =>)
-        .peek((sessionDurationSeconds, sessions) => println(s"sessionDuration $sessionDurationSeconds sessions $sessions"))
-
-    topSessions
-      .flatMapValues((sessionDuration, sessions) => sessions.flatMap(_.tracks.values))
-      .selectKey { case (sessionDuration, track) => track.playCount }
-      .groupByKey(kstream.Grouped.`with`(Serdes.Integer, trackSerdes))
-      .aggregate(List.empty[Track])(mostPlayedTrackAggregator(MAX_TRACKS))
-      .toStream
-      .flatMapValues((playCount, tracks) => tracks)
-      .peek((playCount, track) => println(s"playCount=$playCount track=$track"))
-    // .to(outputTopic)(Produced.`with`(Serdes.String, sessionSerdes))
-     */
 
     val streams = new KafkaStreams(builder.build(), props)
     streams.start()
@@ -161,22 +115,6 @@ object TrackConsumer {
   }
 
   /**
-   * Computes the duration of a window
-   *
-   * @param window The window to compute the duration for
-   * @return The duration of the window in seconds
-   */
-  def windowDuration(window: Window): Long = window.end() - window.start()
-
-  /**
-   * Checks wether a window is empty or not (meaning its duration equals 0)
-   *
-   * @param window The window to check for 0 length
-   * @return A boolean indicating if the window length equals 0 or not
-   */
-  def isWindowEmpty(window: Window): Boolean = windowDuration(window) == 0
-
-  /**
    * Checks if an event is valid, it allows to get rid of intermediary events produced by Kafka
    *
    * @param windowedUserId
@@ -186,36 +124,5 @@ object TrackConsumer {
   def isValidEvent(windowedUserId: Windowed[UserId], tracks: Map[TrackName, Track]): Boolean = {
     tracks != null &&
       tracks.nonEmpty
-  }
-
-  /**
-   * Produces a sequence of strings containing the details for each track and associated session
-   *
-   * @param sessionId
-   * @param session
-   * @return
-   */
-  def mkString(sessionId: SessionId, session: Session): List[(SessionId, String)] = {
-    session
-      .tracks
-      .map(track => (sessionId, toTsv(sessionId, session)(track)))
-  }
-
-  /**
-   * Produces a string containing all the track details and its associated session
-   * Fields are separated by the TRACK_RECORD_FIELD_SEPARATOR
-   *
-   * @param sessionId
-   * @param session
-   * @param track
-   * @return
-   */
-  def toTsv(sessionId: SessionId, session: Session)(track: (Track, TrackRank)): String = {
-    s"""${session.userId}${TRACK_RECORD_FIELD_SEPARATOR}
-       |${session.sessionDurationSeconds}${TRACK_RECORD_FIELD_SEPARATOR}
-       |${track._2 + 1}${TRACK_RECORD_FIELD_SEPARATOR}
-       |${track._1.trackId}${TRACK_RECORD_FIELD_SEPARATOR}
-       |${track._1.trackName}${TRACK_RECORD_FIELD_SEPARATOR}
-       |${track._1.playCount}${TRACK_RECORD_FIELD_SEPARATOR}""".stripMargin.replaceAll("\n", "")
   }
 }

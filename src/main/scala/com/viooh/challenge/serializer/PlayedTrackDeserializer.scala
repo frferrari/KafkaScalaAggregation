@@ -3,7 +3,7 @@ package com.viooh.challenge.serializer
 import java.util
 
 import argonaut.Argonaut._
-import com.viooh.challenge.model.{PlayedTrack, Track}
+import com.viooh.challenge.model.PlayedTrack
 import org.apache.kafka.common.serialization.Deserializer
 
 class PlayedTrackDeserializer extends Deserializer[PlayedTrack] {
