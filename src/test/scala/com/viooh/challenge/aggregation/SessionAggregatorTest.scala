@@ -30,10 +30,10 @@ class SessionAggregatorTest extends WordSpec with Matchers {
     val track3: Track = Track(trackId3, trackName3, 4)
     val track4: Track = Track(trackId4, trackName4, 5)
 
-    val session1: Session = Session("user1", 60, Map(track1.trackName -> track1))
-    val session2: Session = Session("user2", 120, Map(track2.trackName -> track2))
-    val session3: Session = Session("user3", 180, Map(track3.trackName -> track3))
-    val session4: Session = Session("user4", 240, Map(track4.trackName -> track4))
+    val session1: Session = Session("user1", 60, List(track1))
+    val session2: Session = Session("user2", 120, List(track2))
+    val session3: Session = Session("user3", 180, List(track3))
+    val session4: Session = Session("user4", 240, List(track4))
 
     "given a session and an empty sessionStore and a maxSessions = 10" should {
       "return a sessionStore containing the given session" in {

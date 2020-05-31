@@ -2,10 +2,11 @@ package com.viooh.challenge.model
 
 import argonaut.Argonaut._
 import argonaut.{CodecJson, _}
+import com.viooh.challenge.TrackConsumer.PlayCount
 
 case class Track(trackId: String,
                  trackName: String,
-                 playCount: Int)
+                 playCount: PlayCount)
 
 object Track {
   implicit def TrackCodecJson: CodecJson[Track] =

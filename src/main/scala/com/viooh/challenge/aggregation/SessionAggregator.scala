@@ -8,12 +8,14 @@ object SessionAggregator {
    * This aggregator processes each session whose session duration is the same, and produces a collection of this sessions
    * by keeping only the top 50 sessions per session duration.
    *
-   * @param sessionDurationSeconds
-   * @param session
-   * @param sessionStore
-   * @return
+   * @param sessionDurationSeconds The length of the session in seconds
+   * @param session                The session containing different tracks played in this session
+   * @param sessionStore           A collection to store our sessions
+   * @return A collection containing the top maxSessions sessions per sessionDurationInSeconds
    */
-  def sessionAggregator(maxSessions: Int)(sessionDurationSeconds: SessionDuration, session: Session, sessionStore: List[Session]): List[Session] = {
+  def sessionAggregator(maxSessions: Int)(sessionDurationSeconds: SessionDuration,
+                                          session: Session,
+                                          sessionStore: List[Session]): List[Session] = {
     if (sessionStore.isEmpty) {
       // If the sessionSore is empty then we can add the given session
       sessionStore :+ session
@@ -25,7 +27,9 @@ object SessionAggregator {
         val minSessionDuration: Session = sessionStore.minBy(_.sessionDurationSeconds)
 
         if (sessionDurationSeconds > minSessionDuration.sessionDurationSeconds) {
-          (sessionStore :+ session).sortWith(_.sessionDurationSeconds > _.sessionDurationSeconds).take(maxSessions)
+          (sessionStore :+ session)
+            .sortWith(_.sessionDurationSeconds > _.sessionDurationSeconds)
+            .take(maxSessions)
         } else {
           sessionStore
         }
