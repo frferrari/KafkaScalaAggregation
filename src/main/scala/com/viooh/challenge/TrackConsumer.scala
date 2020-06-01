@@ -83,7 +83,6 @@ object TrackConsumer {
 
     lastFmListenings
       .flatMapValues((userId, record) => PlayedTrack(userId, record))
-      .peek((userId, playedTrack) => println(s"userId=$userId playedTrack=$playedTrack"))
       .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
       .windowedBy(sessionWindow)
       .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
