@@ -1,6 +1,7 @@
 bin/
-project/
-target/
+project/project
+project/target
+target
 build/
 
 # eclipse
