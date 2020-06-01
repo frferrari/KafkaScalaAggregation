@@ -1,7 +1,5 @@
 package com.viooh.challenge
 
-import argonaut._
-import Argonaut._
 import java.nio.file.Files
 import java.time.Duration
 import java.util.Properties
@@ -11,16 +9,13 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.viooh.challenge.aggregation.store.TopSessions
 import com.viooh.challenge.model.{PlayedTrack, Session, Track}
 import com.viooh.challenge.serdes.{SessionSerdes, TopSessionsSerdes}
-import com.viooh.challenge.serializer.{TopSessionsDeserializer, TopSessionsSerializer}
 import com.viooh.challenge.utils.TrackTimestampExtractor
-import org.apache.kafka.common.serialization.Serde
-import org.apache.kafka.streams.kstream.Suppressed.StrictBufferConfig
-import org.apache.kafka.streams.kstream.{SessionWindows, Suppressed, Windowed}
+import org.apache.kafka.streams.kstream.{SessionWindows, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
-import org.apache.kafka.streams.scala.kstream.{KStream, Materialized, Produced}
+import org.apache.kafka.streams.scala.kstream.{KStream, Produced}
 import org.apache.kafka.streams.state.{KeyValueBytesStoreSupplier, KeyValueStore, StoreBuilder, Stores}
-import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
+import org.apache.kafka.streams.{KafkaStreams, StreamsConfig}
 import org.slf4j.{Logger, LoggerFactory}
 
 object TrackConsumer {
@@ -72,14 +67,7 @@ object TrackConsumer {
 
     // Windows
     val sessionWindowDuration: Duration = java.time.Duration.ofMinutes(20)
-    val gracePeriod: Duration = java.time.Duration.ofSeconds(10)
-    val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration).grace(gracePeriod)
-
-    val topSessionsAgg: (SessionId, Session, TopSessions) => TopSessions =
-      (sessionId: SessionId, session: Session, agg: TopSessions) => {
-        agg.add(session);
-        agg
-      }
+    val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration)
 
     val adder: (SessionId, Session, TopSessions) => TopSessions =
       (sessionId: SessionId, session: Session, agg: TopSessions) => {
@@ -95,9 +83,11 @@ object TrackConsumer {
 
     lastFmListenings
       .flatMapValues((userId, record) => PlayedTrack(userId, record))
+      .peek((userId, playedTrack) => println(s"userId=$userId playedTrack=$playedTrack"))
       .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
       .windowedBy(sessionWindow)
       .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
+      //.suppress(Suppressed.untilTimeLimit(java.time.Duration.ofSeconds(20), Suppressed.BufferConfig.unbounded()))
       // .suppress(Suppressed.untilWindowCloses(Suppressed.BufferConfig.unbounded()))
       .mapValues(toSession(MAX_TRACKS)(_, _))
       .groupBy((w, session) => session)(kstream.Grouped.`with`(Serdes.String, sessionSerdes))
@@ -105,7 +95,7 @@ object TrackConsumer {
       .toStream
       .flatMapValues(_.toStream)
       .flatMap(mkString)
-      .peek((k, v) => println(s"k=$k v=$v"))
+      .peek((sessionId, session) => println(s"sessionId=$sessionId session=$session"))
       .to(topSongsTopic)(Produced.`with`(Serdes.String, Serdes.String))
 
     val streams = new KafkaStreams(builder.build(), props)
@@ -141,18 +131,6 @@ object TrackConsumer {
     val sessionId: TrackName = randomUUID().toString
 
     (sessionId, Session(sessionId, windowedUserId.key(), sessionSeconds, topTracksPerPlayCount))
-  }
-
-  /**
-   * Checks if an event is valid, it allows to get rid of intermediary events produced by Kafka
-   *
-   * @param windowedUserId
-   * @param tracks
-   * @return
-   */
-  def isValidEvent(windowedUserId: Windowed[UserId], tracks: Map[TrackName, Track]): Boolean = {
-    tracks != null &&
-      tracks.nonEmpty
   }
 
   /**

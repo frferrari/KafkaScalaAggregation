@@ -12,24 +12,26 @@ import scala.collection.mutable
 class TopSessions(maxSessions: Int) extends Iterable[Session] {
   var currentSessions: mutable.Map[SessionId, Session] = mutable.Map.empty[SessionId, Session]
 
-  object DescendingSessionTrackCount extends Ordering[Session] {
+  implicit object DescendingSessionTrackCount extends Ordering[Session] {
     def compare(left: Session, right: Session): Int = {
       val cmp = left.tracks.size.compareTo(right.tracks.size)
       if (cmp != 0)
-        cmp
+        cmp * -1
       else
         left.sessionId.compareTo(right.sessionId)
     }
   }
 
-  var topSessions: mutable.TreeSet[Session] = mutable.TreeSet.empty[Session](DescendingSessionTrackCount)
+  var topSessions: mutable.TreeSet[Session] = mutable.TreeSet.empty[Session]
 
   def add(session: Session): Unit = {
-    if (currentSessions.contains(session.sessionId)) {
-      topSessions.remove(currentSessions.remove(session.sessionId).get) // TODO FIX .get
-    }
+    currentSessions
+      .remove(session.sessionId)
+      .map(topSessions.remove)
+
     topSessions.add(session)
     currentSessions.put(session.sessionId, session)
+
     if (topSessions.size > maxSessions) {
       val lastSession: Session = topSessions.last
       currentSessions.remove(lastSession.sessionId)
@@ -53,7 +55,7 @@ object TopSessions {
 
   implicit def TopSessionsDecodeJson: DecodeJson[TopSessions] =
     DecodeJson(c => {
-      val topSessions = new TopSessions(50) // TODO FIX as it should be a parameter
+      val topSessions = new TopSessions(50) // TODO FIX as it should be a parameter, probably with an implicit class
       for {
         session <- (c \\).as[Session]
         _ = topSessions.add(session)
