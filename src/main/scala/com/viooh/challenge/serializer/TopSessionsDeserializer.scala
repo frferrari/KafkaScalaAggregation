@@ -3,7 +3,7 @@ package com.viooh.challenge.serializer
 import java.util
 
 import argonaut.Argonaut._
-import com.viooh.challenge.aggregation.TopSessions
+import com.viooh.challenge.aggregation.store.TopSessions
 import org.apache.kafka.common.serialization.Deserializer
 
 class TopSessionsDeserializer extends Deserializer[TopSessions] {

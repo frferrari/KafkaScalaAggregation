@@ -1,7 +1,7 @@
 package com.viooh.challenge.serdes
 
 import com.viooh.challenge.TrackConsumer.SessionId
-import com.viooh.challenge.aggregation.TopSessions
+import com.viooh.challenge.aggregation.store.TopSessions
 import com.viooh.challenge.serializer._
 import org.apache.kafka.common.serialization.Serde
 import org.apache.kafka.streams.scala.kstream.Materialized

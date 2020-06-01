@@ -1,4 +1,4 @@
-package com.viooh.challenge.aggregation
+package com.viooh.challenge.aggregation.store
 
 import argonaut.Argonaut._
 import argonaut.Json.jArray

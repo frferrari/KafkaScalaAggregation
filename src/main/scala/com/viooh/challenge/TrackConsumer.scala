@@ -8,13 +8,14 @@ import java.util.Properties
 import java.util.UUID.randomUUID
 
 import com.typesafe.config.{Config, ConfigFactory}
-import com.viooh.challenge.aggregation.TopSessions
+import com.viooh.challenge.aggregation.store.TopSessions
 import com.viooh.challenge.model.{PlayedTrack, Session, Track}
 import com.viooh.challenge.serdes.{SessionSerdes, TopSessionsSerdes}
 import com.viooh.challenge.serializer.{TopSessionsDeserializer, TopSessionsSerializer}
 import com.viooh.challenge.utils.TrackTimestampExtractor
 import org.apache.kafka.common.serialization.Serde
-import org.apache.kafka.streams.kstream.{SessionWindows, Windowed}
+import org.apache.kafka.streams.kstream.Suppressed.StrictBufferConfig
+import org.apache.kafka.streams.kstream.{SessionWindows, Suppressed, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
 import org.apache.kafka.streams.scala.kstream.{KStream, Materialized, Produced}
@@ -74,26 +75,37 @@ object TrackConsumer {
     val gracePeriod: Duration = java.time.Duration.ofSeconds(10)
     val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration).grace(gracePeriod)
 
-    val sessions: KStream[SessionId, Session] =
-      lastFmListenings
-        .flatMapValues((userId, record) => PlayedTrack(userId, record))
-        .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
-        .windowedBy(sessionWindow)
-        .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
-        .toStream
-        .filter(isValidEvent)
-        .map(toSession(MAX_TRACKS))
-
     val topSessionsAgg: (SessionId, Session, TopSessions) => TopSessions =
-      (sessionId: SessionId, session: Session, agg: TopSessions) => { agg.add(session); agg }
+      (sessionId: SessionId, session: Session, agg: TopSessions) => {
+        agg.add(session);
+        agg
+      }
 
-    sessions
-      .groupByKey(kstream.Grouped.`with`(Serdes.String, sessionSerdes))
-      .aggregate(new TopSessions(MAX_SESSIONS))(topSessionsAgg)(TopSessionsSerdes.topSessionsMaterializer)
+    val adder: (SessionId, Session, TopSessions) => TopSessions =
+      (sessionId: SessionId, session: Session, agg: TopSessions) => {
+        agg.add(session)
+        agg
+      }
+
+    val subtractor: (SessionId, Session, TopSessions) => TopSessions =
+      (sessionId: SessionId, session: Session, agg: TopSessions) => {
+        agg.remove(session)
+        agg
+      }
+
+    lastFmListenings
+      .flatMapValues((userId, record) => PlayedTrack(userId, record))
+      .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
+      .windowedBy(sessionWindow)
+      .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
+      // .suppress(Suppressed.untilWindowCloses(Suppressed.BufferConfig.unbounded()))
+      .mapValues(toSession(MAX_TRACKS)(_, _))
+      .groupBy((w, session) => session)(kstream.Grouped.`with`(Serdes.String, sessionSerdes))
+      .aggregate(new TopSessions(MAX_SESSIONS))(adder, subtractor)(TopSessionsSerdes.topSessionsMaterializer)
       .toStream
-      .flatMapValues(topSessions => topSessions.toStream)
-      .peek((sessionId, session) => println(s"sessionId $sessionId session=$session"))
+      .flatMapValues(_.toStream)
       .flatMap(mkString)
+      .peek((k, v) => println(s"k=$k v=$v"))
       .to(topSongsTopic)(Produced.`with`(Serdes.String, Serdes.String))
 
     val streams = new KafkaStreams(builder.build(), props)
