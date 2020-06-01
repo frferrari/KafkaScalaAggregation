@@ -1,20 +1,25 @@
 package com.viooh.challenge
 
+import argonaut._
+import Argonaut._
 import java.nio.file.Files
 import java.time.Duration
 import java.util.Properties
 import java.util.UUID.randomUUID
 
 import com.typesafe.config.{Config, ConfigFactory}
+import com.viooh.challenge.aggregation.TopSessions
 import com.viooh.challenge.model.{PlayedTrack, Session, Track}
-import com.viooh.challenge.serdes.SessionSerdes
+import com.viooh.challenge.serdes.{SessionSerdes, TopSessionsSerdes}
+import com.viooh.challenge.serializer.{TopSessionsDeserializer, TopSessionsSerializer}
 import com.viooh.challenge.utils.TrackTimestampExtractor
+import org.apache.kafka.common.serialization.Serde
 import org.apache.kafka.streams.kstream.{SessionWindows, Windowed}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala._
-import org.apache.kafka.streams.scala.kstream.{KStream, Produced}
+import org.apache.kafka.streams.scala.kstream.{KStream, Materialized, Produced}
 import org.apache.kafka.streams.state.{KeyValueBytesStoreSupplier, KeyValueStore, StoreBuilder, Stores}
-import org.apache.kafka.streams.{KafkaStreams, StreamsConfig}
+import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
 import org.slf4j.{Logger, LoggerFactory}
 
 object TrackConsumer {
@@ -27,7 +32,7 @@ object TrackConsumer {
   type PlayCount = Int
   type TrackRank = Int
 
-  val MAX_SESSIONS = 10
+  val MAX_SESSIONS = 50
   val MAX_TRACKS = 10
 
   def main(args: Array[String]): Unit = {
@@ -69,15 +74,27 @@ object TrackConsumer {
     val gracePeriod: Duration = java.time.Duration.ofSeconds(10)
     val sessionWindow: SessionWindows = SessionWindows.`with`(sessionWindowDuration).grace(gracePeriod)
 
-    lastFmListenings
-      .flatMapValues((userId, record) => PlayedTrack(userId, record))
-      .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
-      .windowedBy(sessionWindow)
-      .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
+    val sessions: KStream[SessionId, Session] =
+      lastFmListenings
+        .flatMapValues((userId, record) => PlayedTrack(userId, record))
+        .groupByKey(kstream.Grouped.`with`(Serdes.String, playedTrackSerdes))
+        .windowedBy(sessionWindow)
+        .aggregate(Map.empty[TrackName, Track])(trackAggregator, trackMerger)
+        .toStream
+        .filter(isValidEvent)
+        .map(toSession(MAX_TRACKS))
+
+    val topSessionsAgg: (SessionId, Session, TopSessions) => TopSessions =
+      (sessionId: SessionId, session: Session, agg: TopSessions) => { agg.add(session); agg }
+
+    sessions
+      .groupByKey(kstream.Grouped.`with`(Serdes.String, sessionSerdes))
+      .aggregate(new TopSessions(MAX_SESSIONS))(topSessionsAgg)(TopSessionsSerdes.topSessionsMaterializer)
       .toStream
-      .filter(isValidEvent)
-      .map(toSession(MAX_TRACKS))
-      .to(sessionTopic)(Produced.`with`(Serdes.String, sessionSerdes))
+      .flatMapValues(topSessions => topSessions.toStream)
+      .peek((sessionId, session) => println(s"sessionId $sessionId session=$session"))
+      .flatMap(mkString)
+      .to(topSongsTopic)(Produced.`with`(Serdes.String, Serdes.String))
 
     val streams = new KafkaStreams(builder.build(), props)
     streams.start()
@@ -124,5 +141,36 @@ object TrackConsumer {
   def isValidEvent(windowedUserId: Windowed[UserId], tracks: Map[TrackName, Track]): Boolean = {
     tracks != null &&
       tracks.nonEmpty
+  }
+
+  /**
+   * Produces a sequence of strings containing the details for each track and associated session
+   *
+   * @param sessionId
+   * @param session
+   * @return
+   */
+  def mkString(sessionId: SessionId, session: Session): List[(SessionId, String)] = {
+    session
+      .tracks
+      .map(track => (sessionId, toTsv(sessionId, session)(track)))
+  }
+
+  /**
+   * Produces a string containing all the track details and its associated session
+   * Fields are separated by the TRACK_RECORD_FIELD_SEPARATOR
+   *
+   * @param sessionId
+   * @param session
+   * @param track
+   * @return
+   */
+  def toTsv(sessionId: SessionId, session: Session)(track: (Track, TrackRank)): String = {
+    s"""${session.userId}${TRACK_RECORD_FIELD_SEPARATOR}
+       |${session.sessionDurationSeconds}${TRACK_RECORD_FIELD_SEPARATOR}
+       |${track._2 + 1}${TRACK_RECORD_FIELD_SEPARATOR}
+       |${track._1.trackId}${TRACK_RECORD_FIELD_SEPARATOR}
+       |${track._1.trackName}${TRACK_RECORD_FIELD_SEPARATOR}
+       |${track._1.playCount}${TRACK_RECORD_FIELD_SEPARATOR}""".stripMargin.replaceAll("\n", "")
   }
 }
