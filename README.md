@@ -5,7 +5,7 @@ The dataset is described here [Lastfm dataset page](http://ocelma.net/MusicRecom
 
 We define a user **session** to be comprised of one or more songs played by that user, where each song is started within 20 minutes of the previous song's start time.  
 
-The goal of this exercise if to extract a list of the top 10 songs played in the top 10 longest sessions by track counts.
+The goal of this exercise if to extract a list of the top 10 songs played in the top 50 longest sessions by track counts.
 
 ## Analysis phase
 
